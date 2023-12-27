@@ -1,15 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:device_info/device_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_speech/google_speech.dart';
+import 'package:location/location.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sound_stream/sound_stream.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'services/websocket_client.dart';
+import 'models/UserLocation.dart';
+import 'package:web_socket_channel/io.dart';
 
 void main() {
   runApp(const MyApp());
 }
+
+final webSocketClient = WebsocketClient();
 
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
@@ -48,13 +56,91 @@ class _AudioRecognizeState extends State<AudioRecognize> {
   StreamSubscription<List<int>>? _audioStreamSubscription;
   BehaviorSubject<List<int>>? _audioStream;
 
+  // get deviceId
+  String deviceId = "";
+
+  UserLocation? userCurrentLocation;
+  var _isGettingLocation = false;
+
+  String backendUrl = "http://localhost:8080";
+
+  Future<String> _getDeviceId() async {
+    DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
+
+    AndroidDeviceInfo androidDeviceInfo = await deviceInfoPlugin.androidInfo;
+
+    return androidDeviceInfo.androidId;
+  }
+
   @override
   void initState() {
     super.initState();
 
     _recorder.initialize();
     _speech = stt.SpeechToText();
+    _startWebSocket();
     // _speech.initialize();
+  }
+
+  _startWebSocket() {
+    webSocketClient.connect(
+      'ws://localhost:8080/ws',
+      {
+        'Authorization': 'Bearer ....',
+      },
+    );
+  }
+
+// mendapatkan lokasi user sekarang
+  void _getCurrentUserLocaton() async {
+    Location location = new Location();
+
+    bool _serviceEnabled;
+    PermissionStatus _permissionGranted;
+    LocationData _locationData;
+
+    _serviceEnabled = await location.serviceEnabled();
+    if (!_serviceEnabled) {
+      _serviceEnabled = await location.requestService();
+      if (!_serviceEnabled) {
+        return null;
+      }
+    }
+
+    _permissionGranted = await location.hasPermission();
+    if (_permissionGranted == PermissionStatus.denied) {
+      _permissionGranted = await location.requestPermission();
+      if (_permissionGranted != PermissionStatus.granted) {
+        return null;
+      }
+    }
+
+    setState(() {
+      _isGettingLocation = true;
+    });
+    _locationData = await location.getLocation();
+
+    setState(() {
+      _isGettingLocation = false;
+    });
+    _sendUserGeolocation(_locationData.latitude!, _locationData.longitude!);
+    return;
+  }
+
+  _sendUserGeolocation(double lat, double long) {
+    _getDeviceId().then((id) {
+      setState(() {
+        deviceId = id;
+        userCurrentLocation =
+            UserLocation(deviceId: deviceId, latitude: lat, longitude: long);
+      });
+    });
+
+    var payload = {
+      'type': 'user_location',
+      'msg_geolocation_user': userCurrentLocation!.toJson()
+    };
+    webSocketClient.send(jsonEncode(payload));
   }
 
   void streamingRecognize() async {
@@ -155,6 +241,11 @@ class _AudioRecognizeState extends State<AudioRecognize> {
               _RecognizeContent(
                 text: text,
               ),
+            StreamBuilder(
+              stream: Stream.periodic(Duration(seconds: 1))
+                  .asyncMap((i) => _getCurrentUserLocaton()),
+              builder: (context, snapshot) => Text(''),
+            ),
             ElevatedButton.icon(
               onPressed: !_isListening ? _listen : stopListening,
               style: ButtonStyle(
