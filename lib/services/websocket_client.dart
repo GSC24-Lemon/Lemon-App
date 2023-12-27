@@ -4,9 +4,7 @@ import 'package:web_socket_channel/io.dart';
 class WebsocketClient {
   IOWebSocketChannel? channel;
 
-  WebsocketClient() {
-    
-  }
+  WebsocketClient() {}
 
   void connect(
     String url,

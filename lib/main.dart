@@ -5,7 +5,9 @@ import 'package:device_info/device_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_speech/google_speech.dart';
+import 'package:lemon_app/services/api_client.dart';
 import 'package:location/location.dart';
+import 'package:platform_device_id/platform_device_id.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sound_stream/sound_stream.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -16,6 +18,11 @@ import 'package:web_socket_channel/io.dart';
 void main() {
   runApp(const MyApp());
 }
+
+final apiClient = ApiClient(tokenProvider: () async {
+  // TODO: Get the bearer token of the current user.
+  return '';
+});
 
 final webSocketClient = WebsocketClient();
 
@@ -57,19 +64,21 @@ class _AudioRecognizeState extends State<AudioRecognize> {
   BehaviorSubject<List<int>>? _audioStream;
 
   // get deviceId
-  String deviceId = "";
+  String? deviceId;
 
   UserLocation? userCurrentLocation;
   var _isGettingLocation = false;
 
-  String backendUrl = "http://localhost:8080";
+  String backendUrl = "http://192.168.4.122:8080";
 
-  Future<String> _getDeviceId() async {
-    DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
+  Future<String?> _getDeviceId() async {
+    String? result = await PlatformDeviceId.getDeviceId;
+    debugPrint("result deviceId: " + result!);
+    setState(() {
+      deviceId = result;
+    });
 
-    AndroidDeviceInfo androidDeviceInfo = await deviceInfoPlugin.androidInfo;
-
-    return androidDeviceInfo.androidId;
+    return result;
   }
 
   @override
@@ -78,13 +87,19 @@ class _AudioRecognizeState extends State<AudioRecognize> {
 
     _recorder.initialize();
     _speech = stt.SpeechToText();
-    _startWebSocket();
+    _getDeviceId().then((id) {
+      _startWebSocket(id!);
+    });
+
     // _speech.initialize();
   }
 
-  _startWebSocket() {
+  _startWebSocket(String id) {
+    // String rilDeviceId = deviceId!;
+    debugPrint("deviceId: $id");
+
     webSocketClient.connect(
-      'ws://localhost:8080/ws',
+      "ws://192.168.4.122:8080/v1/ws?deviceId=$id",
       {
         'Authorization': 'Bearer ....',
       },
@@ -128,13 +143,13 @@ class _AudioRecognizeState extends State<AudioRecognize> {
   }
 
   _sendUserGeolocation(double lat, double long) {
-    _getDeviceId().then((id) {
-      setState(() {
-        deviceId = id;
-        userCurrentLocation =
-            UserLocation(deviceId: deviceId, latitude: lat, longitude: long);
-      });
-    });
+    // _getDeviceId();
+    // debugPrint(" deviceId: $deviceId latitude and longitude: " +
+    //     lat.toString() +
+    //     "long : " +
+    //     long.toString());
+    userCurrentLocation =
+        UserLocation(deviceId: deviceId!, latitude: lat, longitude: long);
 
     var payload = {
       'type': 'user_location',
@@ -182,6 +197,9 @@ class _AudioRecognizeState extends State<AudioRecognize> {
         });
       }
     }, onDone: () {
+      if (text.contains("help")) {
+        sendHelpRequest();
+      }
       setState(() {
         recognizing = false;
       });
@@ -195,6 +213,10 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     setState(() {
       recognizing = false;
     });
+  }
+
+  void sendHelpRequest() async {
+    await apiClient.sendSos(userCurrentLocation!);
   }
 
   RecognitionConfig _getConfig() => RecognitionConfig(
@@ -213,9 +235,12 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     _speech.listen(
       onResult: (val) => setState(() {
         text = val.recognizedWords;
-        print("hasil: " + text);
+        // print("hasil: " + text);
         if (val.hasConfidenceRating && val.confidence > 0) {
           _confidence = val.confidence;
+        }
+        if (text.contains("help")) {
+          sendHelpRequest();
         }
       }),
     );
