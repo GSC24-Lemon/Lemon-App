@@ -13,6 +13,7 @@ import 'package:riverpod/riverpod.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sound_stream/sound_stream.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:string_similarity/string_similarity.dart';
 import 'models/UserData.dart';
 import 'services/websocket_client.dart';
 import 'models/UserLocation.dart';
@@ -437,16 +438,104 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     setState(() => _isListening = _speech.isListening);
 
     // logic voice input
-    if (finalText.toLowerCase().contains("help to accompany me")) {
+    String queryOneKeyWord =
+        "hi lemon i need someone's help to accompany me to";
+    String queryTwoKeyword = "hello lemon my name is";
+    String queryThreeKeyword = "hello lemon my telephone number is";
+
+    var arrFinalText;
+    arrFinalText = finalText.split(" ");
+    if (arrFinalText.length > 9 &&
+        (isSameCommand(queryOneKeyWord, finalText.toLowerCase(), 10) ||
+            finalText.toLowerCase().contains("help to accompany me"))) {
       screenReaderSpeak(
           "okay $username, I will help you find a friend to accompany you to the location you want to go");
       sendHelpRequest(finalText);
-    } else if (finalText.toLowerCase().contains("my name")) {
+    } else if (arrFinalText.length > 5 &&
+        (isSameCommand(queryTwoKeyword, finalText.toLowerCase(), 5) ||
+            finalText.toLowerCase().contains("my name"))) {
       registerUserName(finalText);
-    } else if (finalText.toLowerCase().contains("telephone number") ||
-        finalText.toLowerCase().contains("telepon number")) {
+    } else if (arrFinalText.length > 6 &&
+        (isSameCommand(queryThreeKeyword, finalText.toLowerCase(), 6) ||
+            finalText.toLowerCase().contains("telephone number") ||
+            finalText.toLowerCase().contains("telepon number"))) {
       registerTelephoneNumber(finalText);
+    } else {
+      screenReaderSpeak(
+          "Please enter the correct voice command $username!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
     }
+  }
+
+  double similiarityString(String s1, s2) {
+    return s1.similarityTo(s2);
+  }
+
+  bool isSameCommand(String s1, s2, int n) {
+    double tes = isSimiliar(s1, s2, n);
+    String s2Benar = transformToTheRightSpechText(s1, s2, n);
+    setState(() {
+      finalText = s2Benar;
+    });
+    debugPrint("finalTextBenar: " + s2Benar);
+    return tes >= 0.7;
+  }
+
+  double isSimiliar(String s1, s2, int n) {
+    // n jumlah kata sampai sebelum query
+    var arrS1 = s1.split(" ");
+    String s1pattern = "";
+    for (int i = 0; i < n; i++) {
+      s1pattern += arrS1[i] + " ";
+    }
+
+    var arrS2 = s2.split(" ");
+    String s2pattern = "";
+    String newS2 = "";
+    int i = 0;
+    while (i < n) {
+      s2pattern += arrS2[i] + " ";
+      newS2 += arrS1[i] + " ";
+      i++;
+    }
+    while (i < arrS2.length) {
+      newS2 += arrS2[i] + " ";
+      i++;
+    }
+
+    double tes = similiarityString(s1pattern, s2pattern);
+
+    return tes;
+  }
+
+  String transformToTheRightSpechText(String s1, s2, int n) {
+    // s2 yang ingin diubah ke string awaalan s1
+    // n jumlah kata yang sama
+    var arrS1 = s1.split(" ");
+    String s1pattern = "";
+    for (int i = 0; i < n; i++) {
+      s1pattern += arrS1[i] + " ";
+    }
+    // debugPrint("s1: " + s1pattern);
+
+    var arrS2 = s2.split(" ");
+    String s2pattern = "";
+    String newS2 = "";
+    int i = 0;
+    while (i < n) {
+      s2pattern += arrS2[i] + " ";
+      newS2 += arrS1[i] + " ";
+      i++;
+    }
+    while (i < arrS2.length) {
+      newS2 += arrS2[i] + " ";
+      i++;
+    }
+
+    // debugPrint(" s2: " + s2pattern);
+    double tes = similiarityString(s1pattern, s2pattern);
+
+    return newS2;
   }
 
   @override
