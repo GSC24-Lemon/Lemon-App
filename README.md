@@ -21,3 +21,9 @@ samples, guidance on mobile development, and a full API reference.
 2. google speech to text
 3. google text to speech
 4. websocket
+
+
+## Quick Start
+- never logged in:
+  1.  say "Hello lemon, my name is [your name]"
+  2. say "Hello lemon, my telephone number is [your telephone number]"

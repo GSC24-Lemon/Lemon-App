@@ -13,6 +13,7 @@ import 'package:riverpod/riverpod.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sound_stream/sound_stream.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'models/UserData.dart';
 import 'services/websocket_client.dart';
 import 'models/UserLocation.dart';
 import 'package:web_socket_channel/io.dart';
@@ -84,6 +85,9 @@ class _AudioRecognizeState extends State<AudioRecognize> {
   String username = "";
   String telNumber = "";
 
+  UserData? userData;
+  String finalText = "";
+
   Future<String?> _getDeviceId() async {
     String? result = await PlatformDeviceId.getDeviceId;
     debugPrint("result deviceId: " + result!);
@@ -117,10 +121,12 @@ class _AudioRecognizeState extends State<AudioRecognize> {
           "hello, please introduce your name to me so you can use the Lime application features");
     } else {
       String? userName = loginData?.getString("name");
+      setState(() {
+        username = userName!;
+      });
       screenReaderSpeak(
-          "Hello $userName!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]");
-      screenReaderSpeak(
-          "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+          "Hello $userName!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
     }
   }
 
@@ -184,9 +190,10 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     //     lat.toString() +
     //     "long : " +
     //     long.toString());
-    userCurrentLocation =
-        UserLocation(deviceId: deviceId!, latitude: lat, longitude: long);
-
+    setState(() {
+      userCurrentLocation =
+          UserLocation(deviceId: deviceId!, latitude: lat, longitude: long);
+    });
     var payload = {
       'type': 'user_location',
       'msg_geolocation_user': userCurrentLocation!.toJson()
@@ -234,7 +241,7 @@ class _AudioRecognizeState extends State<AudioRecognize> {
       }
     }, onDone: () {
       if (text.contains("help")) {
-        sendHelpRequest();
+        sendHelpRequest(text);
       }
       setState(() {
         recognizing = false;
@@ -251,8 +258,33 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     });
   }
 
-  void sendHelpRequest() async {
-    await apiClient.sendSos(userCurrentLocation!);
+  void sendHelpRequest(String speechText) async {
+    var pattern;
+    if (speechText.contains("someone's")) {
+      pattern = "someone's help to accompany me to";
+    } else if (speechText.contains("someone")) {
+      pattern = "someone help to accompany me to";
+    } else {
+      screenReaderSpeak(
+          "Hello $username!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+    }
+
+    String hailorDestination = substringMatcher(speechText, pattern);
+
+    setState(() {
+      userCurrentLocation = UserLocation(
+          deviceId: deviceId!,
+          latitude: userCurrentLocation!.latitude,
+          longitude: userCurrentLocation!.longitude,
+          username: username,
+          destination: hailorDestination);
+    });
+
+    await apiClient.sendSos(jsonEncode(userCurrentLocation));
+    setState(() {
+      finalText = "";
+    });
   }
 
   RecognitionConfig _getConfig() => RecognitionConfig(
@@ -263,29 +295,27 @@ class _AudioRecognizeState extends State<AudioRecognize> {
       languageCode: 'en-US');
 
   void _listen() async {
-    await _speech.initialize(
-      onStatus: (val) => setState(() => _isListening = false),
+    final isAvailable = await _speech.initialize(
+      onStatus: (val) => setState(() => _isListening = true),
       onError: (val) => print('onError: $val'),
     );
     setState(() => _isListening = true);
-    _speech.listen(
-      onResult: (val) => setState(() {
-        text = val.recognizedWords;
-        // print("hasil: " + text);
-        if (val.hasConfidenceRating && val.confidence > 0) {
-          _confidence = val.confidence;
-        }
 
-        // logic voice input
-        if (text.toLowerCase().contains("help")) {
-          screenReaderSpeak(
-              "okay, I will help you find a friend to accompany you to the location you want to go");
-          sendHelpRequest();
-        } else if (text.toLowerCase().contains("my name")) {
-          registerUserName(text);
-        } else if (text.toLowerCase().contains("number")) {}
-      }),
-    );
+    if (isAvailable) {
+      _speech.listen(
+        onResult: (val) => setState(() {
+          // print("hasil: " + text);
+          if (val.hasConfidenceRating && val.confidence > 0) {
+            _confidence = val.confidence;
+          }
+
+          setState(() {
+            finalText = val.recognizedWords;
+          });
+          debugPrint("tes: " + finalText);
+        }),
+      );
+    }
   }
 
   // register user name
@@ -295,26 +325,42 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     String name = substringMatcher(speechText, pattern);
 
     loginData!.setString("name", name);
-    loginData!.setBool("login", true);
     setState(() {
       username = name;
     });
     screenReaderSpeak(
-        "thank you for introducing yourself, now enter your telephone number by saying the following sentence: my telephone number is [your telephone number]");
+        "thank you for introducing yourself $username, now enter your telephone number by saying the following sentence: my telephone number is [your telephone number]");
+    setState(() {
+      finalText = "";
+    });
   }
 
-  void registerTelephoneNumber(String speechText) {
-    String pattern = "my telephone number is";
-    String telephone = substringMatcher(speechText, pattern);
+  void registerTelephoneNumber(String speechText) async {
+    var telephone;
+    if (speechText.contains("telephone")) {
+      String pattern = "my telephone number is";
+      telephone = substringMatcher(speechText, pattern);
+    } else if (speechText.contains("telepon")) {
+      String pattern = "my telepon number is";
+      telephone = substringMatcher(speechText, pattern);
+    }
+
     loginData!.setString("telephone", telephone);
     setState(() {
       telNumber = telephone;
     });
     screenReaderSpeak(
-        "thank you $username , now you can use the lime application, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]");
+        "thank you $username , now you can use the lime application, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
+            "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
 
-    screenReaderSpeak(
-        "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+    setState(() {
+      userData = UserData(
+          username: username, telephone: telephone, deviceId: deviceId!);
+      finalText = "";
+    });
+
+    await apiClient.registerUser(jsonEncode(userData));
+    loginData!.setBool("login", true);
   }
 
   List computeLPS(String pattern) {
@@ -387,8 +433,20 @@ class _AudioRecognizeState extends State<AudioRecognize> {
   }
 
   void stopListening() {
-    setState(() => _isListening = false);
     _speech.stop();
+    setState(() => _isListening = _speech.isListening);
+
+    // logic voice input
+    if (finalText.toLowerCase().contains("help to accompany me")) {
+      screenReaderSpeak(
+          "okay $username, I will help you find a friend to accompany you to the location you want to go");
+      sendHelpRequest(finalText);
+    } else if (finalText.toLowerCase().contains("my name")) {
+      registerUserName(finalText);
+    } else if (finalText.toLowerCase().contains("telephone number") ||
+        finalText.toLowerCase().contains("telepon number")) {
+      registerTelephoneNumber(finalText);
+    }
   }
 
   @override
@@ -413,7 +471,7 @@ class _AudioRecognizeState extends State<AudioRecognize> {
               child: Image.asset('assets/images/logo.png'),
             ),
             StreamBuilder(
-              stream: Stream.periodic(Duration(seconds: 1))
+              stream: Stream.periodic(Duration(seconds: 2))
                   .asyncMap((i) => _getCurrentUserLocaton()),
               builder: (context, snapshot) => Container(
                 width: 1.0,
@@ -494,7 +552,6 @@ class _AudioRecognizeState extends State<AudioRecognize> {
                       fixedSize: MaterialStateProperty.all(Size(300, 300)),
                       padding: MaterialStateProperty.all(EdgeInsets.all(50.0)),
                       shadowColor: MaterialStateProperty.all(Colors.black)),
-                    
                 ),
               ),
             ])

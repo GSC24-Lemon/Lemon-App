@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:lemon_app/models/UserLocation.dart';
+
+import '../models/UserData.dart';
 
 typedef TokenProvider = Future<String?> Function();
 
@@ -11,7 +14,7 @@ class ApiClient {
     required TokenProvider tokenProvider,
     http.Client? httpClient,
   }) : this._(
-          baseUrl: 'http://localhost:8080',
+          baseUrl: 'http://192.168.4.122:8080',
           tokenProvider: tokenProvider,
           httpClient: httpClient,
         );
@@ -28,12 +31,23 @@ class ApiClient {
   final String _baseUrl;
   final http.Client _httpClient;
 
-  Future<Map<String, dynamic>> sendSos(UserLocation userLocation) async {
-    final url = Uri.parse('http://localhost:8080/v1/caregiver/help');
+  Future<Map<String, dynamic>> sendSos(String userLocation) async {
+    final url = Uri.parse('$_baseUrl/v1/caregiver/help');
     final response = await _handleRequest((headers) => _httpClient.post(
           url,
           headers: headers,
-          body: userLocation.toJson(),
+          body: userLocation,
+        ));
+
+    return response;
+  }
+
+  Future<Map<String, dynamic>> registerUser(String userData) async {
+    final url = Uri.parse('$_baseUrl/v1/user/registerName');
+    final response = await _handleRequest((headers) => _httpClient.post(
+          url,
+          headers: headers,
+          body: userData,
         ));
 
     return response;
@@ -47,8 +61,9 @@ class ApiClient {
       final response = await request(headers);
       final body = jsonDecode(response.body);
 
-      if (response.statusCode != HttpStatus.ok) {
-        throw Exception('${response.statusCode}, error: ${body['message']}');
+
+      if (response.statusCode >= 400) {
+        throw Exception('${response.statusCode}, error: ${body['error']}');
       }
 
       return body;
