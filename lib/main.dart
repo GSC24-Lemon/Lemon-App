@@ -105,7 +105,7 @@ class _AudioRecognizeState extends State<AudioRecognize> {
 
     _recorder.initialize();
     _speech = stt.SpeechToText();
-    _getDeviceId().then((id) {
+    _getDeviceId()!?.then((id) {
       _startWebSocket(id!);
     });
     check_if_already_login();
@@ -126,8 +126,8 @@ class _AudioRecognizeState extends State<AudioRecognize> {
         username = userName!;
       });
       screenReaderSpeak(
-          "Hello $userName!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
-              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+          "Hello $userName!, To use the help seeking feature say the following sentence: hello lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: hello lemon, I need someone to guide me to [the location you want to go to]");
     }
   }
 
@@ -211,7 +211,7 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     await _recorder.start();
 
     setState(() {
-      recognizing = true;
+      _isListening = true;
     });
     final serviceAccount = ServiceAccount.fromString((await rootBundle
         .loadString('assets/micro-scanner-402411-a937b7573580.json')));
@@ -231,21 +231,18 @@ class _AudioRecognizeState extends State<AudioRecognize> {
       if (data.results.first.isFinal) {
         responseText += '\n' + currentText;
         setState(() {
-          text = responseText;
+          finalText = responseText;
           recognizeFinished = true;
         });
       } else {
         setState(() {
-          text = responseText + '\n' + currentText;
+          finalText = responseText + '\n' + currentText;
           recognizeFinished = true;
         });
       }
     }, onDone: () {
-      if (text.contains("help")) {
-        sendHelpRequest(text);
-      }
       setState(() {
-        recognizing = false;
+        _isListening = false;
       });
     });
   }
@@ -255,8 +252,45 @@ class _AudioRecognizeState extends State<AudioRecognize> {
     await _audioStreamSubscription?.cancel();
     await _audioStream?.close();
     setState(() {
-      recognizing = false;
+      _isListening = false;
     });
+
+    debugPrint("finalText: " + finalText);
+
+    // logic voice input
+    String queryOneKeyWord =
+        "hello lemon i need someone's help to accompany me to";
+    String queryTwoKeyword = "hello lemon my name is";
+    String queryThreeKeyword = "hello lemon my telephone number is";
+
+    var arrFinalText;
+    arrFinalText = finalText.split(" ");
+    if (finalText.toLowerCase().contains("help") &&
+        arrFinalText.length > 9 &&
+        (isSameCommand(queryOneKeyWord, finalText.toLowerCase(), 10))) {
+      screenReaderSpeak(
+          "okay $username, I will help you find a friend to accompany you to the location you want to go");
+      sendHelpRequest(finalText);
+    } else if (finalText.toLowerCase().contains("my name") &&
+        arrFinalText.length > 4 &&
+        (isSameCommand(queryTwoKeyword, finalText.toLowerCase(), 4))) {
+      registerUserName(finalText);
+    } else if ((finalText.toLowerCase().contains("telephone number") ||
+            finalText.toLowerCase().contains("telepon number")) &&
+        arrFinalText.length > 5 &&
+        (isSameCommand(queryThreeKeyword, finalText.toLowerCase(), 5))) {
+      registerTelephoneNumber(finalText);
+    } else {
+      bool isLogin = loginData!.getBool('login') == true ? true : false;
+      if (isLogin == false) {
+        screenReaderSpeak(
+            "Please enter the correct voice command $username!.enter your telephone number by saying the following sentence: my telephone number is [your telephone number] ");
+        return;
+      }
+      screenReaderSpeak(
+          "Please enter the correct voice command $username!, To use the help seeking feature say the following sentence: hello lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: hello lemon, I need someone to guide me to [the location you want to go to]");
+    }
   }
 
   void sendHelpRequest(String speechText) async {
@@ -267,8 +301,8 @@ class _AudioRecognizeState extends State<AudioRecognize> {
       pattern = "someone help to accompany me to";
     } else {
       screenReaderSpeak(
-          "Hello $username!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
-              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+          "Hello $username!, To use the help seeking feature say the following sentence: hello lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: hello lemon, I need someone to guide me to [the location you want to go to]");
     }
 
     String hailorDestination = substringMatcher(speechText, pattern);
@@ -351,17 +385,16 @@ class _AudioRecognizeState extends State<AudioRecognize> {
       telNumber = telephone;
     });
     screenReaderSpeak(
-        "thank you $username , now you can use the lime application, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
-            "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+        "thank you $username , now you can use the lime application, To use the help seeking feature say the following sentence: hello lemon, I need someone's help to accompany me to [location you want to go]" +
+            "To use the video call assistance feature, say the following sentence: hello lemon, I need someone to guide me to [the location you want to go to]");
 
     setState(() {
       userData = UserData(
           username: username, telephone: telephone, deviceId: deviceId!);
       finalText = "";
     });
-
-    await apiClient.registerUser(jsonEncode(userData));
     loginData!.setBool("login", true);
+    await apiClient.registerUser(jsonEncode(userData));
   }
 
   List computeLPS(String pattern) {
@@ -439,31 +472,37 @@ class _AudioRecognizeState extends State<AudioRecognize> {
 
     // logic voice input
     String queryOneKeyWord =
-        "hi lemon i need someone's help to accompany me to";
+        "hello lemon i need someone's help to accompany me to";
     String queryTwoKeyword = "hello lemon my name is";
     String queryThreeKeyword = "hello lemon my telephone number is";
 
     var arrFinalText;
     arrFinalText = finalText.split(" ");
-    if (arrFinalText.length > 9 &&
-        (isSameCommand(queryOneKeyWord, finalText.toLowerCase(), 10) ||
-            finalText.toLowerCase().contains("help to accompany me"))) {
+    if (finalText.toLowerCase().contains("help") &&
+        arrFinalText.length > 9 &&
+        (isSameCommand(queryOneKeyWord, finalText.toLowerCase(), 10))) {
       screenReaderSpeak(
           "okay $username, I will help you find a friend to accompany you to the location you want to go");
       sendHelpRequest(finalText);
-    } else if (arrFinalText.length > 5 &&
-        (isSameCommand(queryTwoKeyword, finalText.toLowerCase(), 5) ||
-            finalText.toLowerCase().contains("my name"))) {
+    } else if (finalText.toLowerCase().contains("my name") &&
+        arrFinalText.length > 4 &&
+        (isSameCommand(queryTwoKeyword, finalText.toLowerCase(), 4))) {
       registerUserName(finalText);
-    } else if (arrFinalText.length > 6 &&
-        (isSameCommand(queryThreeKeyword, finalText.toLowerCase(), 6) ||
-            finalText.toLowerCase().contains("telephone number") ||
-            finalText.toLowerCase().contains("telepon number"))) {
+    } else if ((finalText.toLowerCase().contains("telephone number") ||
+            finalText.toLowerCase().contains("telepon number")) &&
+        arrFinalText.length > 5 &&
+        (isSameCommand(queryThreeKeyword, finalText.toLowerCase(), 5))) {
       registerTelephoneNumber(finalText);
     } else {
+      bool isLogin = loginData!.getBool('login') == true ? true : false;
+      if (isLogin == false) {
+        screenReaderSpeak(
+            "Please enter the correct voice command $username!.enter your telephone number by saying the following sentence: my telephone number is [your telephone number] ");
+        return;
+      }
       screenReaderSpeak(
-          "Please enter the correct voice command $username!, To use the help seeking feature say the following sentence: Hi Lemon, I need someone's help to accompany me to [location you want to go]" +
-              "To use the video call assistance feature, say the following sentence: Hi Lemon, I need someone to guide me to [the location you want to go to]");
+          "Please enter the correct voice command $username!, To use the help seeking feature say the following sentence: hello lemon, I need someone's help to accompany me to [location you want to go]" +
+              "To use the video call assistance feature, say the following sentence: hello lemon, I need someone to guide me to [the location you want to go to]");
     }
   }
 
@@ -540,19 +579,11 @@ class _AudioRecognizeState extends State<AudioRecognize> {
 
   @override
   Widget build(BuildContext context) {
-    // initSpeech();
     return Scaffold(
-      // appBar: AppBar(
-      //   title: const Text('Audio File Example'),
-      // ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
-            if (recognizeFinished)
-              _RecognizeContent(
-                text: text,
-              ),
             SizedBox(
               height: 100,
             ),
@@ -567,30 +598,9 @@ class _AudioRecognizeState extends State<AudioRecognize> {
                 height: 0.0,
               ),
             ),
-
-            // ElevatedButton.icon(
-            //   onPressed: !_isListening ? _listen : stopListening,
-            //   style: ButtonStyle(
-            //     backgroundColor: MaterialStateProperty.all(
-            //         Color.fromARGB(255, 250, 208, 44)),
-            //     shape: MaterialStateProperty.all(CircleBorder()),
-            //     fixedSize: MaterialStateProperty.all(Size(200, 200)),
-            //     padding: MaterialStateProperty.all(EdgeInsets.all(50.0)),
-            //   ),
-            //   icon:  Icon(Icons.mic, color: Colors.white, size: 90),
-            //   label: _isListening // recognizing // aslinya ini
-            //       ? const Text('Stop recording')
-            //       : const Text('Start Streaming from mic'),
-
-            //   // onPressed: recognizing ? stopRecording : streamingRecognize,
-            //   // child: _isListening // recognizing // aslinya ini
-            //   //     ? const Text('Stop recording')
-            //   //     : const Text('Start Streaming from mic'),
-            // ),
             SizedBox(
               height: 10,
             ),
-
             Stack(alignment: Alignment.center, children: <Widget>[
               Container(
                 width: double.infinity,
@@ -615,7 +625,9 @@ class _AudioRecognizeState extends State<AudioRecognize> {
               Positioned(
                 top: 100,
                 child: ElevatedButton(
-                  onPressed: !_isListening ? _listen : stopListening,
+                  onPressed: !_isListening
+                      ? _listen
+                      : stopListening, //_listen : stopListening,
                   child: Container(
                     width: 300.0,
                     height: 300.0,
@@ -644,34 +656,6 @@ class _AudioRecognizeState extends State<AudioRecognize> {
                 ),
               ),
             ])
-
-            // Stack(
-            //   alignment: Alignment.bottomCenter,
-            //   children: <Widget>[
-            // Container(
-            //   width: double.infinity,
-            //   height: double.infinity,
-            //   color: Colors.white,
-            // ),
-            //     // Positioned(
-            //     //   top: 2,
-            //     //   child:
-
-            //     // ),
-            // Align(
-            //   alignment: Alignment.bottomCenter,
-            //   // child: ClipPath(
-            //   //   clipper: CustomClipPath(),
-            //   child: Container(
-            //     alignment: Alignment.bottomCenter,
-            //     color: Color.fromARGB(255, 209, 221, 231),
-            //     height: 110,
-            //     width: double.infinity,
-            //   ),
-            // ),
-            // )
-            //   ],
-            // ),
           ],
         ),
       ), // This trailing comma makes auto-formatting nicer for build methods.
@@ -720,29 +704,29 @@ class CustomClipPath extends CustomClipper<Path> {
   }
 }
 
-class _RecognizeContent extends StatelessWidget {
-  final String? text;
+// class _RecognizeContent extends StatelessWidget {
+//   final String? text;
 
-  const _RecognizeContent({Key? key, this.text}) : super(key: key);
+//   const _RecognizeContent({Key? key, this.text}) : super(key: key);
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        children: <Widget>[
-          const Text(
-            'The text recognized by the Google Speech Api:',
-          ),
-          const SizedBox(
-            height: 16.0,
-          ),
-          Text(
-            text ?? '---',
-            style: Theme.of(context).textTheme.bodyText1,
-          ),
-        ],
-      ),
-    );
-  }
-}
+//   @override
+//   Widget build(BuildContext context) {
+//     return Padding(
+//       padding: const EdgeInsets.all(16.0),
+//       child: Column(
+//         children: <Widget>[
+//           const Text(
+//             'The text recognized by the Google Speech Api:',
+//           ),
+//           const SizedBox(
+//             height: 16.0,
+//           ),
+//           Text(
+//             text ?? '---',
+//             style: Theme.of(context).textTheme.bodyText1,
+//           ),
+//         ],
+//       ),
+//     );
+//   }
+// }
